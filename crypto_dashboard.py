@@ -675,8 +675,8 @@ def send_email(html_content: str) -> bool:
         html_part = MIMEText(html_content, "html")
         msg.attach(html_part)
         
-        # Outlook SMTP
-        with smtplib.SMTP("smtp-mail.outlook.com", 587) as server:
+        # Gmail SMTP
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.sendmail(EMAIL_ADDRESS, EMAIL_ADDRESS, msg.as_string())
