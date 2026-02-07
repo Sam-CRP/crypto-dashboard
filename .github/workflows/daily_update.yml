@@ -2,9 +2,7 @@ name: Daily Crypto Dashboard
 
 on:
   schedule:
-    # 독일 06:50 = UTC 05:50
     - cron: '50 5 * * *'
-    # 독일 21:20 = UTC 20:20
     - cron: '20 20 * * *'
   
   workflow_dispatch:
@@ -32,5 +30,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           python crypto_dashboard.py
