@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-🚀 Crypto Dashboard - 매일 아침 자동 업데이트
-무료 데이터 소스만 사용하여 비트코인 온체인/매크로 지표 수집
-
-실행: python crypto_dashboard.py
+🚀 Crypto Dashboard v3 - 맞춤 버전
+알림 시간: 독일 06:50, 21:20
 """
 
 import os
@@ -17,20 +15,18 @@ import time
 # 설정
 # ============================================
 
-# Telegram 설정 (선택사항 - 환경변수로 설정)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-
-# FRED API 키 (https://fred.stlouisfed.org/docs/api/api_key.html 에서 무료 발급)
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 
 # ============================================
 # 데이터 수집 함수들
 # ============================================
 
-def get_btc_price() -> Dict[str, Any]:
-    """CoinGecko에서 BTC 가격 및 기본 데이터 (무료)"""
+def get_btc_detailed() -> Dict[str, Any]:
+    """BTC 상세 데이터 (가격, 52주 고저, 120일 MA)"""
     try:
+        # 현재 가격 및 기본 데이터
         url = "https://api.coingecko.com/api/v3/coins/bitcoin"
         params = {
             "localization": "false",
@@ -38,53 +34,140 @@ def get_btc_price() -> Dict[str, Any]:
             "community_data": "false",
             "developer_data": "false"
         }
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         data = response.json()
-        
         market_data = data.get("market_data", {})
-        return {
-            "price_usd": market_data.get("current_price", {}).get("usd", 0),
+        
+        current_price = market_data.get("current_price", {}).get("usd", 0)
+        ath = market_data.get("ath", {}).get("usd", 0)
+        ath_change = market_data.get("ath_change_percentage", {}).get("usd", 0)
+        
+        result = {
+            "price_usd": current_price,
             "price_krw": market_data.get("current_price", {}).get("krw", 0),
             "change_24h": market_data.get("price_change_percentage_24h", 0),
             "change_7d": market_data.get("price_change_percentage_7d", 0),
-            "market_cap": market_data.get("market_cap", {}).get("usd", 0),
-            "ath": market_data.get("ath", {}).get("usd", 0),
-            "ath_change": market_data.get("ath_change_percentage", {}).get("usd", 0),
+            "ath": ath,
+            "ath_change": ath_change,
         }
+        
+        # 52주 고저 및 120일 MA 계산을 위한 히스토리 데이터
+        time.sleep(1)  # Rate limit
+        history_url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+        history_params = {
+            "vs_currency": "usd",
+            "days": "365",  # 1년 데이터
+            "interval": "daily"
+        }
+        history_response = requests.get(history_url, params=history_params, timeout=15)
+        history_data = history_response.json()
+        
+        prices = [p[1] for p in history_data.get("prices", [])]
+        
+        if prices:
+            # 52주 최고/최저
+            high_52w = max(prices)
+            low_52w = min(prices)
+            
+            # 52주 최고 대비 하락폭
+            from_52w_high = ((current_price - high_52w) / high_52w * 100) if high_52w else 0
+            
+            # 52주 최저 대비 상승폭
+            from_52w_low = ((current_price - low_52w) / low_52w * 100) if low_52w else 0
+            
+            result["high_52w"] = high_52w
+            result["low_52w"] = low_52w
+            result["from_52w_high"] = from_52w_high
+            result["from_52w_low"] = from_52w_low
+            
+            # 120일 MA 계산
+            if len(prices) >= 120:
+                ma_120 = sum(prices[-120:]) / 120
+                ma_distance = ((current_price - ma_120) / ma_120 * 100) if ma_120 else 0
+                result["ma_120"] = ma_120
+                result["ma_120_distance"] = ma_distance
+            else:
+                result["ma_120"] = None
+                result["ma_120_distance"] = None
+        
+        return result
+        
     except Exception as e:
-        print(f"❌ BTC 가격 조회 실패: {e}")
+        print(f"❌ BTC 상세 조회 실패: {e}")
         return {}
 
 
-def get_eth_price() -> Dict[str, Any]:
-    """CoinGecko에서 ETH 가격 (무료)"""
+def get_eth_detailed() -> Dict[str, Any]:
+    """ETH 상세 데이터 (가격, 52주 고저, 120일 MA)"""
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price"
+        # 현재 가격
+        url = "https://api.coingecko.com/api/v3/coins/ethereum"
         params = {
-            "ids": "ethereum",
-            "vs_currencies": "usd,krw",
-            "include_24hr_change": "true",
-            "include_7d_change": "true"
+            "localization": "false",
+            "tickers": "false",
+            "community_data": "false",
+            "developer_data": "false"
         }
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json().get("ethereum", {})
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        market_data = data.get("market_data", {})
         
-        return {
-            "price_usd": data.get("usd", 0),
-            "price_krw": data.get("krw", 0),
-            "change_24h": data.get("usd_24h_change", 0),
+        current_price = market_data.get("current_price", {}).get("usd", 0)
+        
+        result = {
+            "price_usd": current_price,
+            "price_krw": market_data.get("current_price", {}).get("krw", 0),
+            "change_24h": market_data.get("price_change_percentage_24h", 0),
+            "change_7d": market_data.get("price_change_percentage_7d", 0),
         }
+        
+        # 52주 고저 및 120일 MA
+        time.sleep(1)
+        history_url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
+        history_params = {
+            "vs_currency": "usd",
+            "days": "365",
+            "interval": "daily"
+        }
+        history_response = requests.get(history_url, params=history_params, timeout=15)
+        history_data = history_response.json()
+        
+        prices = [p[1] for p in history_data.get("prices", [])]
+        
+        if prices:
+            high_52w = max(prices)
+            low_52w = min(prices)
+            
+            from_52w_high = ((current_price - high_52w) / high_52w * 100) if high_52w else 0
+            from_52w_low = ((current_price - low_52w) / low_52w * 100) if low_52w else 0
+            
+            result["high_52w"] = high_52w
+            result["low_52w"] = low_52w
+            result["from_52w_high"] = from_52w_high
+            result["from_52w_low"] = from_52w_low
+            
+            if len(prices) >= 120:
+                ma_120 = sum(prices[-120:]) / 120
+                ma_distance = ((current_price - ma_120) / ma_120 * 100) if ma_120 else 0
+                result["ma_120"] = ma_120
+                result["ma_120_distance"] = ma_distance
+            else:
+                result["ma_120"] = None
+                result["ma_120_distance"] = None
+        
+        return result
+        
     except Exception as e:
-        print(f"❌ ETH 가격 조회 실패: {e}")
+        print(f"❌ ETH 상세 조회 실패: {e}")
         return {}
 
 
 def get_fear_greed_index() -> Dict[str, Any]:
-    """Alternative.me Fear & Greed Index (무료)"""
+    """Fear & Greed Index"""
     try:
         url = "https://api.alternative.me/fng/"
-        params = {"limit": 7}  # 최근 7일
-        response = requests.get(url, params=params, timeout=10)
+        params = {"limit": 7}
+        response = requests.get(url, params=params, timeout=15)
         data = response.json().get("data", [])
         
         if data:
@@ -105,9 +188,8 @@ def get_fear_greed_index() -> Dict[str, Any]:
 
 
 def get_us_m2_supply() -> Dict[str, Any]:
-    """FRED API에서 미국 M2 통화량 (무료 - API 키 필요)"""
+    """FRED API - 미국 M2"""
     if not FRED_API_KEY:
-        print("⚠️ FRED_API_KEY 환경변수가 설정되지 않았습니다")
         return {}
     
     try:
@@ -117,9 +199,9 @@ def get_us_m2_supply() -> Dict[str, Any]:
             "api_key": FRED_API_KEY,
             "file_type": "json",
             "sort_order": "desc",
-            "limit": 13,  # 최근 13개월 (YoY 계산용)
+            "limit": 13,
         }
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         data = response.json().get("observations", [])
         
         if len(data) >= 2:
@@ -128,7 +210,6 @@ def get_us_m2_supply() -> Dict[str, Any]:
             year_ago = float(data[12].get("value", current)) if len(data) > 12 else current
             
             return {
-                "value_billions": current,
                 "value_trillions": current / 1000,
                 "date": data[0].get("date", ""),
                 "mom_change": ((current - previous) / previous * 100) if previous else 0,
@@ -140,102 +221,104 @@ def get_us_m2_supply() -> Dict[str, Any]:
 
 
 def get_funding_rate() -> Dict[str, Any]:
-    """Binance에서 BTC Funding Rate (무료)"""
+    """Binance Funding Rate"""
     try:
         url = "https://fapi.binance.com/fapi/v1/fundingRate"
         params = {"symbol": "BTCUSDT", "limit": 1}
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=15)
         data = response.json()
         
         if data:
             rate = float(data[0].get("fundingRate", 0))
             return {
-                "rate": rate,
                 "rate_percent": rate * 100,
-                "annualized": rate * 100 * 3 * 365,  # 8시간마다 3번
-                "status": "과열" if rate > 0.001 else "정상" if rate > -0.001 else "과매도",
+                "status": "🔴과열" if rate > 0.001 else "🟢정상" if rate > -0.001 else "🔵과매도",
             }
     except Exception as e:
         print(f"❌ Funding Rate 조회 실패: {e}")
     return {}
 
 
-def get_open_interest() -> Dict[str, Any]:
-    """Binance에서 BTC Open Interest (무료)"""
-    try:
-        url = "https://fapi.binance.com/fapi/v1/openInterest"
-        params = {"symbol": "BTCUSDT"}
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        
-        oi_btc = float(data.get("openInterest", 0))
-        
-        # 가격 조회해서 USD 환산
-        btc_price = get_btc_price().get("price_usd", 0)
-        oi_usd = oi_btc * btc_price if btc_price else 0
-        
-        return {
-            "btc": oi_btc,
-            "usd": oi_usd,
-            "usd_billions": oi_usd / 1_000_000_000,
-        }
-    except Exception as e:
-        print(f"❌ Open Interest 조회 실패: {e}")
-    return {}
-
-
-def get_etf_flow_sosovalue() -> Dict[str, Any]:
-    """SoSoValue에서 ETF Flow (웹에서 수동 확인 필요 - API 제한적)"""
-    # SoSoValue API는 제한적이므로 수동 입력 또는 스크래핑 필요
-    # 여기서는 URL만 제공
-    return {
-        "btc_etf_url": "https://sosovalue.com/assets/etf/us-btc-spot",
-        "eth_etf_url": "https://sosovalue.com/assets/etf/us-eth-spot",
-        "note": "수동 확인 필요 (자동 스크래핑 어려움)",
-    }
-
-
 def get_kimchi_premium() -> Dict[str, Any]:
-    """업비트/바이낸스 비교로 김치 프리미엄 계산"""
+    """김치 프리미엄"""
     try:
-        # 업비트 BTC 가격 (KRW)
-        upbit_url = "https://api.upbit.com/v1/ticker"
-        upbit_response = requests.get(upbit_url, params={"markets": "KRW-BTC"}, timeout=10)
+        upbit_response = requests.get(
+            "https://api.upbit.com/v1/ticker", 
+            params={"markets": "KRW-BTC"}, 
+            timeout=15
+        )
         upbit_price = upbit_response.json()[0].get("trade_price", 0)
         
-        # 바이낸스 BTC 가격 (USDT)
-        binance_url = "https://api.binance.com/api/v3/ticker/price"
-        binance_response = requests.get(binance_url, params={"symbol": "BTCUSDT"}, timeout=10)
+        binance_response = requests.get(
+            "https://api.binance.com/api/v3/ticker/price", 
+            params={"symbol": "BTCUSDT"}, 
+            timeout=15
+        )
         binance_price = float(binance_response.json().get("price", 0))
         
-        # 환율 (USD/KRW)
-        fx_url = "https://api.exchangerate-api.com/v4/latest/USD"
-        fx_response = requests.get(fx_url, timeout=10)
+        fx_response = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=15)
         usd_krw = fx_response.json().get("rates", {}).get("KRW", 1300)
         
-        # 김치 프리미엄 계산
         binance_krw = binance_price * usd_krw
         premium = ((upbit_price - binance_krw) / binance_krw * 100) if binance_krw else 0
         
         return {
-            "upbit_krw": upbit_price,
-            "binance_usdt": binance_price,
-            "binance_krw": binance_krw,
-            "usd_krw": usd_krw,
             "premium_percent": round(premium, 2),
-            "status": "과열" if premium > 5 else "정상" if premium > -2 else "역프리미엄",
+            "usd_krw": usd_krw,
+            "status": "🔴과열" if premium > 5 else "🟢정상" if premium > -2 else "🔵역프",
         }
     except Exception as e:
         print(f"❌ 김치 프리미엄 조회 실패: {e}")
     return {}
 
 
+def get_btc_dominance() -> Dict[str, Any]:
+    """BTC 도미넌스"""
+    try:
+        url = "https://api.coingecko.com/api/v3/global"
+        response = requests.get(url, timeout=15)
+        data = response.json().get("data", {})
+        
+        return {
+            "btc_dominance": round(data.get("market_cap_percentage", {}).get("btc", 0), 1),
+            "eth_dominance": round(data.get("market_cap_percentage", {}).get("eth", 0), 1),
+        }
+    except Exception as e:
+        print(f"⚠️ 도미넌스 조회 실패: {e}")
+    return {}
+
+
+def get_stablecoin_supply() -> Dict[str, Any]:
+    """스테이블코인 시총"""
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price"
+        params = {
+            "ids": "tether,usd-coin",
+            "vs_currencies": "usd",
+            "include_market_cap": "true"
+        }
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        
+        usdt = data.get("tether", {}).get("usd_market_cap", 0) / 1e9
+        usdc = data.get("usd-coin", {}).get("usd_market_cap", 0) / 1e9
+        
+        return {
+            "usdt_billions": usdt,
+            "usdc_billions": usdc,
+            "total_billions": usdt + usdc,
+        }
+    except Exception as e:
+        print(f"⚠️ 스테이블코인 조회 실패: {e}")
+    return {}
+
+
 # ============================================
-# 분석 및 판단 로직
+# 시그널 분석 (매매 추천 없음)
 # ============================================
 
-def analyze_market(data: Dict[str, Any]) -> Dict[str, Any]:
-    """수집된 데이터를 기반으로 시장 분석"""
+def analyze_signals(data: Dict[str, Any]) -> Dict[str, Any]:
+    """시장 시그널 분석 - 정보 제공만, 추천 없음"""
     
     signals = {
         "bullish": [],
@@ -243,86 +326,53 @@ def analyze_market(data: Dict[str, Any]) -> Dict[str, Any]:
         "neutral": [],
     }
     
-    # Fear & Greed 분석
+    # Fear & Greed
     fg = data.get("fear_greed", {})
     if fg:
         value = fg.get("value", 50)
-        if value <= 20:
-            signals["bullish"].append(f"극단적 공포 ({value}) - 역발상 매수 기회")
-        elif value <= 40:
-            signals["neutral"].append(f"공포 구간 ({value})")
-        elif value >= 80:
-            signals["bearish"].append(f"극단적 탐욕 ({value}) - 조정 가능성")
-        elif value >= 60:
-            signals["neutral"].append(f"탐욕 구간 ({value})")
-    
-    # M2 분석
-    m2 = data.get("m2_supply", {})
-    if m2:
-        yoy = m2.get("yoy_change", 0)
-        if yoy > 5:
-            signals["bullish"].append(f"M2 YoY +{yoy:.1f}% - 유동성 확대")
-        elif yoy > 0:
-            signals["neutral"].append(f"M2 YoY +{yoy:.1f}%")
+        if value <= 25:
+            signals["bullish"].append(f"극단적 공포 ({value})")
+        elif value >= 75:
+            signals["bearish"].append(f"극단적 탐욕 ({value})")
         else:
-            signals["bearish"].append(f"M2 YoY {yoy:.1f}% - 유동성 축소")
+            signals["neutral"].append(f"Fear & Greed {value}")
     
-    # Funding Rate 분석
+    # 120일 MA 거리
+    btc = data.get("btc", {})
+    if btc:
+        ma_dist = btc.get("ma_120_distance")
+        if ma_dist is not None:
+            if ma_dist < -20:
+                signals["bullish"].append(f"120D MA 대비 {ma_dist:.1f}%")
+            elif ma_dist > 50:
+                signals["bearish"].append(f"120D MA 대비 +{ma_dist:.1f}%")
+            elif ma_dist < 0:
+                signals["neutral"].append(f"120D MA 아래 ({ma_dist:.1f}%)")
+            else:
+                signals["neutral"].append(f"120D MA 위 (+{ma_dist:.1f}%)")
+    
+    # Funding Rate
     fr = data.get("funding_rate", {})
     if fr:
         rate = fr.get("rate_percent", 0)
-        if rate > 0.1:
-            signals["bearish"].append(f"Funding Rate 과열 ({rate:.3f}%)")
-        elif rate < -0.05:
-            signals["bullish"].append(f"Funding Rate 과매도 ({rate:.3f}%)")
-        else:
-            signals["neutral"].append(f"Funding Rate 정상 ({rate:.3f}%)")
+        if rate > 0.05:
+            signals["bearish"].append(f"Funding 과열 ({rate:.3f}%)")
+        elif rate < -0.01:
+            signals["bullish"].append(f"Funding 과매도 ({rate:.3f}%)")
     
-    # 김치 프리미엄 분석
+    # 김치 프리미엄
     kp = data.get("kimchi_premium", {})
     if kp:
         premium = kp.get("premium_percent", 0)
         if premium > 5:
-            signals["bearish"].append(f"김치 프리미엄 과열 ({premium:.1f}%)")
+            signals["bearish"].append(f"김프 과열 ({premium:.1f}%)")
         elif premium < -2:
-            signals["bullish"].append(f"김치 역프리미엄 ({premium:.1f}%)")
-        else:
-            signals["neutral"].append(f"김치 프리미엄 정상 ({premium:.1f}%)")
-    
-    # BTC 가격 분석
-    btc = data.get("btc", {})
-    if btc:
-        change_7d = btc.get("change_7d", 0)
-        ath_change = btc.get("ath_change", 0)
-        
-        if change_7d < -15:
-            signals["bullish"].append(f"7일 급락 ({change_7d:.1f}%) - 반등 가능성")
-        elif change_7d > 15:
-            signals["bearish"].append(f"7일 급등 ({change_7d:.1f}%) - 조정 가능성")
-        
-        if ath_change < -50:
-            signals["bullish"].append(f"ATH 대비 {ath_change:.0f}% - 저점 매수 구간")
-    
-    # 종합 판단
-    bullish_count = len(signals["bullish"])
-    bearish_count = len(signals["bearish"])
-    
-    if bullish_count > bearish_count + 1:
-        overall = "🟢 BULLISH"
-        action = "분할 매수 고려"
-    elif bearish_count > bullish_count + 1:
-        overall = "🔴 BEARISH"
-        action = "매수 대기, 리스크 관리"
-    else:
-        overall = "🟡 NEUTRAL"
-        action = "관망, 확인 후 대응"
+            signals["bullish"].append(f"김프 역프리미엄 ({premium:.1f}%)")
     
     return {
         "signals": signals,
-        "overall": overall,
-        "action": action,
-        "bullish_count": bullish_count,
-        "bearish_count": bearish_count,
+        "bullish_count": len(signals["bullish"]),
+        "bearish_count": len(signals["bearish"]),
     }
 
 
@@ -331,9 +381,10 @@ def analyze_market(data: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================
 
 def generate_report(data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-    """텔레그램/콘솔용 리포트 생성"""
+    """텔레그램용 리포트"""
     
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (독일)
+    time_str = now.strftime("%Y-%m-%d %H:%M")
     
     btc = data.get("btc", {})
     eth = data.get("eth", {})
@@ -341,64 +392,77 @@ def generate_report(data: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     m2 = data.get("m2_supply", {})
     fr = data.get("funding_rate", {})
     kp = data.get("kimchi_premium", {})
+    dom = data.get("dominance", {})
+    stable = data.get("stablecoin", {})
     
-    report = f"""
-📊 **크립토 대시보드** ({now})
+    # 시그널
+    bullish = analysis.get("signals", {}).get("bullish", [])
+    bearish = analysis.get("signals", {}).get("bearish", [])
+    
+    bullish_text = "\n".join(f"  • {s}" for s in bullish) if bullish else "  • 없음"
+    bearish_text = "\n".join(f"  • {s}" for s in bearish) if bearish else "  • 없음"
+    
+    # 120D MA 포맷
+    btc_ma = btc.get('ma_120_distance')
+    btc_ma_str = f"{btc_ma:+.1f}%" if btc_ma is not None else "N/A"
+    btc_ma_price = f"${btc.get('ma_120', 0):,.0f}" if btc.get('ma_120') else "N/A"
+    
+    eth_ma = eth.get('ma_120_distance')
+    eth_ma_str = f"{eth_ma:+.1f}%" if eth_ma is not None else "N/A"
+    eth_ma_price = f"${eth.get('ma_120', 0):,.0f}" if eth.get('ma_120') else "N/A"
+    
+    report = f"""📊 *크립토 대시보드*
+_{time_str} CET_
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 
-💰 **가격 현황**
-• BTC: ${btc.get('price_usd', 0):,.0f} ({btc.get('change_24h', 0):+.1f}% 24h)
-• ETH: ${eth.get('price_usd', 0):,.0f} ({eth.get('change_24h', 0):+.1f}% 24h)
-• BTC ATH 대비: {btc.get('ath_change', 0):.0f}%
+*BTC* ${btc.get('price_usd', 0):,.0f} ({btc.get('change_24h', 0):+.1f}%)
+• 120D MA: {btc_ma_price} ({btc_ma_str})
+• 52주 최고 대비: {btc.get('from_52w_high', 0):.1f}%
+• 52주 최저 대비: +{btc.get('from_52w_low', 0):.1f}%
 
-━━━━━━━━━━━━━━━━━━━━━━
+*ETH* ${eth.get('price_usd', 0):,.0f} ({eth.get('change_24h', 0):+.1f}%)
+• 120D MA: {eth_ma_price} ({eth_ma_str})
+• 52주 최고 대비: {eth.get('from_52w_high', 0):.1f}%
+• 52주 최저 대비: +{eth.get('from_52w_low', 0):.1f}%
 
-📈 **시장 지표**
+━━━━━━━━━━━━━━━━━━━
+
+*시장 지표*
 • Fear & Greed: {fg.get('value', 'N/A')} ({fg.get('classification', '')})
-  └ 어제: {fg.get('yesterday', 'N/A')} | 7일전: {fg.get('week_ago', 'N/A')}
-• 김치 프리미엄: {kp.get('premium_percent', 'N/A')}% ({kp.get('status', '')})
-• Funding Rate: {fr.get('rate_percent', 0):.4f}% ({fr.get('status', '')})
+• 김치프리미엄: {kp.get('premium_percent', 'N/A')}% {kp.get('status', '')}
+• Funding: {fr.get('rate_percent', 0):.4f}% {fr.get('status', '')}
+• BTC 도미넌스: {dom.get('btc_dominance', 'N/A')}%
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 
-💵 **매크로**
+*매크로*
 • US M2: ${m2.get('value_trillions', 0):.2f}T (YoY {m2.get('yoy_change', 0):+.1f}%)
 • USD/KRW: {kp.get('usd_krw', 0):,.0f}
+• 스테이블: ${stable.get('total_billions', 0):.0f}B
 
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 
-🎯 **시그널 분석**
-
+*시그널*
 🟢 Bullish ({analysis.get('bullish_count', 0)}):
-{chr(10).join('• ' + s for s in analysis.get('signals', {}).get('bullish', ['없음'])) or '• 없음'}
+{bullish_text}
 
 🔴 Bearish ({analysis.get('bearish_count', 0)}):
-{chr(10).join('• ' + s for s in analysis.get('signals', {}).get('bearish', ['없음'])) or '• 없음'}
+{bearish_text}
 
-━━━━━━━━━━━━━━━━━━━━━━
-
-**종합 판단: {analysis.get('overall', 'N/A')}**
-**액션: {analysis.get('action', 'N/A')}**
-
-━━━━━━━━━━━━━━━━━━━━━━
-📌 수동 확인 필요:
-• ETF Flow: sosovalue.com/assets/etf/us-btc-spot
-• LTH-SOPR: charts.bgeometrics.com/lth_sopr.html
-• MVRV: charts.bgeometrics.com/mvrv.html
-• 글로벌 M2: charts.bgeometrics.com/m2_global.html
+━━━━━━━━━━━━━━━━━━━
+🔗 [ETF Flow](https://sosovalue.com/assets/etf/us-btc-spot) • [LTH-SOPR](https://charts.bgeometrics.com/lth_sopr.html) • [MVRV](https://charts.bgeometrics.com/mvrv.html) • [글로벌M2](https://charts.bgeometrics.com/m2_global.html)
 """
     return report.strip()
 
 
 # ============================================
-# 알림 발송
+# 텔레그램 발송
 # ============================================
 
 def send_telegram(message: str) -> bool:
-    """텔레그램으로 메시지 발송"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram 설정이 없습니다. 콘솔에만 출력합니다.")
+        print("⚠️ Telegram 미설정")
         return False
     
     try:
@@ -407,97 +471,79 @@ def send_telegram(message: str) -> bool:
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
             "parse_mode": "Markdown",
+            "disable_web_page_preview": True,
         }
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=15)
         if response.status_code == 200:
             print("✅ 텔레그램 발송 성공")
             return True
         else:
-            print(f"❌ 텔레그램 발송 실패: {response.text}")
+            print(f"❌ 발송 실패: {response.text}")
     except Exception as e:
-        print(f"❌ 텔레그램 발송 오류: {e}")
+        print(f"❌ 발송 오류: {e}")
     return False
 
 
 # ============================================
-# 메인 실행
+# 메인
 # ============================================
 
 def main():
-    print("🚀 크립토 대시보드 데이터 수집 시작...")
-    print("=" * 50)
+    print("🚀 크립토 대시보드 시작...")
+    print("=" * 40)
     
-    # 데이터 수집
     data = {}
     
-    print("📊 BTC 가격 조회 중...")
-    data["btc"] = get_btc_price()
-    time.sleep(1)  # Rate limit 방지
+    print("📊 BTC 데이터...")
+    data["btc"] = get_btc_detailed()
+    time.sleep(2)
     
-    print("📊 ETH 가격 조회 중...")
-    data["eth"] = get_eth_price()
-    time.sleep(1)
+    print("📊 ETH 데이터...")
+    data["eth"] = get_eth_detailed()
+    time.sleep(2)
     
-    print("📊 Fear & Greed Index 조회 중...")
+    print("📊 Fear & Greed...")
     data["fear_greed"] = get_fear_greed_index()
     time.sleep(1)
     
-    print("📊 US M2 Supply 조회 중...")
+    print("📊 US M2...")
     data["m2_supply"] = get_us_m2_supply()
     time.sleep(1)
     
-    print("📊 Funding Rate 조회 중...")
+    print("📊 Funding Rate...")
     data["funding_rate"] = get_funding_rate()
     time.sleep(1)
     
-    print("📊 김치 프리미엄 조회 중...")
+    print("📊 김치 프리미엄...")
     data["kimchi_premium"] = get_kimchi_premium()
+    time.sleep(1)
     
-    print("📊 ETF Flow URL 확인...")
-    data["etf_flow"] = get_etf_flow_sosovalue()
+    print("📊 도미넌스...")
+    data["dominance"] = get_btc_dominance()
+    time.sleep(1)
     
-    print("=" * 50)
-    print("🔍 시장 분석 중...")
+    print("📊 스테이블코인...")
+    data["stablecoin"] = get_stablecoin_supply()
     
-    # 분석
-    analysis = analyze_market(data)
+    print("=" * 40)
+    print("🔍 분석 중...")
     
-    # 리포트 생성
+    analysis = analyze_signals(data)
     report = generate_report(data, analysis)
     
-    # 콘솔 출력
     print("\n" + report)
-    
-    # 텔레그램 발송
     send_telegram(report)
     
-    # JSON 파일로 저장 (GitHub Actions에서 히스토리 추적용)
-    output = {
-        "timestamp": datetime.now().isoformat(),
-        "data": data,
-        "analysis": analysis,
-    }
-    
+    # 저장
     os.makedirs("data", exist_ok=True)
     with open("data/latest.json", "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "data": data,
+            "analysis": analysis,
+        }, f, ensure_ascii=False, indent=2)
     
-    # 히스토리 추가
-    history_file = "data/history.json"
-    history = []
-    if os.path.exists(history_file):
-        with open(history_file, "r", encoding="utf-8") as f:
-            history = json.load(f)
-    
-    history.append(output)
-    history = history[-30:]  # 최근 30일만 유지
-    
-    with open(history_file, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
-    
-    print("\n✅ 완료! data/latest.json에 저장됨")
-    
-    return output
+    print("\n✅ 완료!")
 
 
 if __name__ == "__main__":
