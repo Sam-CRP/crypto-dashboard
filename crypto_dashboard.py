@@ -1,33 +1,40 @@
 #!/usr/bin/env python3
 """
-🚀 Crypto Dashboard v4 - 신호등 버전
-알림 시간: 독일 06:50, 21:20
+🚀 Crypto Dashboard v5
+- Traffic light indicators
+- Telegram + Outlook email
+- Schedule: Germany 06:50, 21:20
 """
 
 import os
 import json
 import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import time
 
 # ============================================
-# 설정
+# CONFIG
 # ============================================
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
 
 # ============================================
-# 신호등 판단 함수들
+# TRAFFIC LIGHT FUNCTIONS
 # ============================================
 
 def get_ma_signal(distance: float) -> str:
-    """120D MA 거리 신호등
-    🟢 +5% 이상 (MA 위 건강)
-    🟡 -5% ~ +5% (MA 근처)
-    🔴 -5% 이하 (MA 아래 위험)
+    """120D MA distance
+    🟢 +5% or higher (healthy above MA)
+    🟡 -5% to +5% (near MA)
+    🔴 -5% or lower (danger below MA)
     """
     if distance is None:
         return "⚪"
@@ -40,10 +47,10 @@ def get_ma_signal(distance: float) -> str:
 
 
 def get_52w_high_signal(change: float) -> str:
-    """52주 고점 대비 신호등
-    🟢 -15% 이내 (고점 근처)
-    🟡 -15% ~ -40%
-    🔴 -40% 이하 (크게 하락)
+    """52-week high distance
+    🟢 within -15% (near high)
+    🟡 -15% to -40%
+    🔴 -40% or lower (far from high)
     """
     if change is None:
         return "⚪"
@@ -56,10 +63,10 @@ def get_52w_high_signal(change: float) -> str:
 
 
 def get_52w_low_signal(change: float) -> str:
-    """52주 저점 대비 신호등
-    🟢 +100% 이상 (많이 상승)
-    🟡 +30% ~ +100%
-    🔴 +30% 이하 (저점 근처)
+    """52-week low distance
+    🟢 +100% or higher (far from low)
+    🟡 +30% to +100%
+    🔴 +30% or lower (near low)
     """
     if change is None:
         return "⚪"
@@ -72,10 +79,10 @@ def get_52w_low_signal(change: float) -> str:
 
 
 def get_fear_greed_signal(value: int) -> str:
-    """Fear & Greed 신호등
-    🟢 ≤25 (극단적 공포 = 역발상 기회)
-    🟡 26~74 (중립)
-    🔴 ≥75 (극단적 탐욕 = 주의)
+    """Fear & Greed Index
+    🟢 ≤25 (extreme fear = opportunity)
+    🟡 26-74 (neutral)
+    🔴 ≥75 (extreme greed = caution)
     """
     if value is None:
         return "⚪"
@@ -88,10 +95,10 @@ def get_fear_greed_signal(value: int) -> str:
 
 
 def get_kimchi_signal(premium: float) -> str:
-    """김치 프리미엄 신호등
-    🟢 -1% ~ 2% (정상)
-    🟡 2%~5% 또는 -1%~-3%
-    🔴 >5% 또는 <-3%
+    """Kimchi Premium
+    🟢 -1% to 2% (normal)
+    🟡 2%-5% or -1% to -3%
+    🔴 >5% or <-3%
     """
     if premium is None:
         return "⚪"
@@ -104,10 +111,10 @@ def get_kimchi_signal(premium: float) -> str:
 
 
 def get_funding_signal(rate: float) -> str:
-    """Funding Rate 신호등 (%)
-    🟢 -0.01% ~ 0.03% (정상)
-    🟡 0.03%~0.08% 또는 -0.01%~-0.03%
-    🔴 >0.08% 또는 <-0.03% (과열/과매도)
+    """Funding Rate (%)
+    🟢 -0.01% to 0.03% (normal)
+    🟡 0.03% to 0.08% or -0.01% to -0.03%
+    🔴 >0.08% or <-0.03% (overheated/oversold)
     """
     if rate is None:
         return "⚪"
@@ -120,10 +127,10 @@ def get_funding_signal(rate: float) -> str:
 
 
 def get_dominance_signal(dom: float) -> str:
-    """BTC 도미넌스 신호등
-    🟢 50%~60% (균형)
-    🟡 45%~50% 또는 60%~65%
-    🔴 <45% 또는 >65%
+    """BTC Dominance
+    🟢 50%-60% (balanced)
+    🟡 45%-50% or 60%-65%
+    🔴 <45% or >65%
     """
     if dom is None:
         return "⚪"
@@ -136,10 +143,10 @@ def get_dominance_signal(dom: float) -> str:
 
 
 def get_m2_signal(yoy: float) -> str:
-    """US M2 YoY 신호등
-    🟢 >5% (유동성 확장)
-    🟡 0%~5%
-    🔴 <0% (유동성 축소)
+    """US M2 YoY
+    🟢 >5% (liquidity expansion)
+    🟡 0%-5%
+    🔴 <0% (liquidity contraction)
     """
     if yoy is None:
         return "⚪"
@@ -152,9 +159,9 @@ def get_m2_signal(yoy: float) -> str:
 
 
 def get_stablecoin_signal(total_b: float) -> str:
-    """스테이블코인 시총 신호등
+    """Stablecoin Market Cap
     🟢 >$200B
-    🟡 $150B~$200B
+    🟡 $150B-$200B
     🔴 <$150B
     """
     if total_b is None:
@@ -168,11 +175,11 @@ def get_stablecoin_signal(total_b: float) -> str:
 
 
 # ============================================
-# 데이터 수집 함수들
+# DATA COLLECTION
 # ============================================
 
 def get_btc_detailed() -> Dict[str, Any]:
-    """BTC 상세 데이터"""
+    """BTC detailed data"""
     try:
         url = "https://api.coingecko.com/api/v3/coins/bitcoin"
         params = {
@@ -215,12 +222,12 @@ def get_btc_detailed() -> Dict[str, Any]:
         
         return result
     except Exception as e:
-        print(f"❌ BTC 조회 실패: {e}")
+        print(f"❌ BTC fetch failed: {e}")
         return {}
 
 
 def get_eth_detailed() -> Dict[str, Any]:
-    """ETH 상세 데이터"""
+    """ETH detailed data"""
     try:
         url = "https://api.coingecko.com/api/v3/coins/ethereum"
         params = {
@@ -263,7 +270,7 @@ def get_eth_detailed() -> Dict[str, Any]:
         
         return result
     except Exception as e:
-        print(f"❌ ETH 조회 실패: {e}")
+        print(f"❌ ETH fetch failed: {e}")
         return {}
 
 
@@ -284,12 +291,12 @@ def get_fear_greed_index() -> Dict[str, Any]:
                 "yesterday": int(yesterday.get("value", 0)),
             }
     except Exception as e:
-        print(f"❌ Fear & Greed 조회 실패: {e}")
+        print(f"❌ Fear & Greed fetch failed: {e}")
     return {}
 
 
 def get_us_m2_supply() -> Dict[str, Any]:
-    """FRED API - 미국 M2"""
+    """FRED API - US M2"""
     if not FRED_API_KEY:
         return {}
     
@@ -307,7 +314,6 @@ def get_us_m2_supply() -> Dict[str, Any]:
         
         if len(data) >= 2:
             current = float(data[0].get("value", 0))
-            previous = float(data[1].get("value", 0))
             year_ago = float(data[12].get("value", current)) if len(data) > 12 else current
             
             return {
@@ -315,7 +321,7 @@ def get_us_m2_supply() -> Dict[str, Any]:
                 "yoy_change": ((current - year_ago) / year_ago * 100) if year_ago else 0,
             }
     except Exception as e:
-        print(f"❌ M2 조회 실패: {e}")
+        print(f"❌ M2 fetch failed: {e}")
     return {}
 
 
@@ -331,12 +337,12 @@ def get_funding_rate() -> Dict[str, Any]:
             rate = float(data[0].get("fundingRate", 0))
             return {"rate_percent": rate * 100}
     except Exception as e:
-        print(f"❌ Funding Rate 조회 실패: {e}")
+        print(f"❌ Funding Rate fetch failed: {e}")
     return {}
 
 
 def get_kimchi_premium() -> Dict[str, Any]:
-    """김치 프리미엄"""
+    """Kimchi Premium"""
     try:
         upbit_response = requests.get(
             "https://api.upbit.com/v1/ticker", 
@@ -363,12 +369,12 @@ def get_kimchi_premium() -> Dict[str, Any]:
             "usd_krw": usd_krw,
         }
     except Exception as e:
-        print(f"❌ 김치 프리미엄 조회 실패: {e}")
+        print(f"❌ Kimchi Premium fetch failed: {e}")
     return {}
 
 
 def get_btc_dominance() -> Dict[str, Any]:
-    """BTC 도미넌스"""
+    """BTC Dominance"""
     try:
         url = "https://api.coingecko.com/api/v3/global"
         response = requests.get(url, timeout=15)
@@ -378,12 +384,12 @@ def get_btc_dominance() -> Dict[str, Any]:
             "btc_dominance": round(data.get("market_cap_percentage", {}).get("btc", 0), 1),
         }
     except Exception as e:
-        print(f"⚠️ 도미넌스 조회 실패: {e}")
+        print(f"⚠️ Dominance fetch failed: {e}")
     return {}
 
 
 def get_stablecoin_supply() -> Dict[str, Any]:
-    """스테이블코인 시총"""
+    """Stablecoin Market Cap"""
     try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         params = {
@@ -399,16 +405,16 @@ def get_stablecoin_supply() -> Dict[str, Any]:
         
         return {"total_billions": usdt + usdc}
     except Exception as e:
-        print(f"⚠️ 스테이블코인 조회 실패: {e}")
+        print(f"⚠️ Stablecoin fetch failed: {e}")
     return {}
 
 
 # ============================================
-# 리포트 생성
+# REPORT GENERATION
 # ============================================
 
 def generate_report(data: Dict[str, Any]) -> str:
-    """텔레그램용 리포트 (신호등 포함)"""
+    """Generate Telegram report with traffic lights"""
     
     now = datetime.utcnow() + timedelta(hours=1)
     time_str = now.strftime("%Y-%m-%d %H:%M")
@@ -422,95 +428,217 @@ def generate_report(data: Dict[str, Any]) -> str:
     dom = data.get("dominance", {})
     stable = data.get("stablecoin", {})
     
-    # BTC 신호등
+    # BTC signals
     btc_ma_dist = btc.get('ma_120_distance')
     btc_ma_sig = get_ma_signal(btc_ma_dist)
     btc_52h_sig = get_52w_high_signal(btc.get('from_52w_high'))
     btc_52l_sig = get_52w_low_signal(btc.get('from_52w_low'))
     
-    # ETH 신호등
+    # ETH signals
     eth_ma_dist = eth.get('ma_120_distance')
     eth_ma_sig = get_ma_signal(eth_ma_dist)
     eth_52h_sig = get_52w_high_signal(eth.get('from_52w_high'))
     eth_52l_sig = get_52w_low_signal(eth.get('from_52w_low'))
     
-    # 시장 지표 신호등
+    # Market signals
     fg_sig = get_fear_greed_signal(fg.get('value'))
     kp_sig = get_kimchi_signal(kp.get('premium_percent'))
     fr_sig = get_funding_signal(fr.get('rate_percent'))
     dom_sig = get_dominance_signal(dom.get('btc_dominance'))
     
-    # 매크로 신호등
+    # Macro signals
     m2_sig = get_m2_signal(m2.get('yoy_change'))
     stable_sig = get_stablecoin_signal(stable.get('total_billions'))
     
-    # 포맷팅
+    # Formatting
     btc_ma_str = f"{btc_ma_dist:+.1f}%" if btc_ma_dist else "N/A"
     btc_ma_price = f"${btc.get('ma_120', 0):,.0f}" if btc.get('ma_120') else "N/A"
     eth_ma_str = f"{eth_ma_dist:+.1f}%" if eth_ma_dist else "N/A"
     eth_ma_price = f"${eth.get('ma_120', 0):,.0f}" if eth.get('ma_120') else "N/A"
     
-    report = f"""📊 *크립토 대시보드 v4*
+    report = f"""📊 *Crypto Dashboard v5*
 _{time_str} CET_
 
 ━━━━━━━━━━━━━━━━━━━
 
 *BTC* ${btc.get('price_usd', 0):,.0f} ({btc.get('change_24h', 0):+.1f}%)
 {btc_ma_sig} 120D MA: {btc_ma_price} ({btc_ma_str})
-{btc_52h_sig} 52주 고점 대비: {btc.get('from_52w_high', 0):.1f}%
-{btc_52l_sig} 52주 저점 대비: +{btc.get('from_52w_low', 0):.1f}%
+{btc_52h_sig} vs 52w High: {btc.get('from_52w_high', 0):.1f}%
+{btc_52l_sig} vs 52w Low: +{btc.get('from_52w_low', 0):.1f}%
 
 *ETH* ${eth.get('price_usd', 0):,.0f} ({eth.get('change_24h', 0):+.1f}%)
 {eth_ma_sig} 120D MA: {eth_ma_price} ({eth_ma_str})
-{eth_52h_sig} 52주 고점 대비: {eth.get('from_52w_high', 0):.1f}%
-{eth_52l_sig} 52주 저점 대비: +{eth.get('from_52w_low', 0):.1f}%
+{eth_52h_sig} vs 52w High: {eth.get('from_52w_high', 0):.1f}%
+{eth_52l_sig} vs 52w Low: +{eth.get('from_52w_low', 0):.1f}%
 
 ━━━━━━━━━━━━━━━━━━━
 
-*시장 지표*
+*Market Indicators*
 {fg_sig} Fear & Greed: {fg.get('value', 'N/A')} ({fg.get('classification', '')})
-{kp_sig} 김치프리미엄: {kp.get('premium_percent', 'N/A')}%
+{kp_sig} Kimchi Premium: {kp.get('premium_percent', 'N/A')}%
 {fr_sig} Funding Rate: {fr.get('rate_percent', 0):.4f}%
-{dom_sig} BTC 도미넌스: {dom.get('btc_dominance', 'N/A')}%
+{dom_sig} BTC Dominance: {dom.get('btc_dominance', 'N/A')}%
 
 ━━━━━━━━━━━━━━━━━━━
 
-*매크로*
+*Macro*
 {m2_sig} US M2: ${m2.get('value_trillions', 0):.2f}T (YoY {m2.get('yoy_change', 0):+.1f}%)
 ⚪ USD/KRW: {kp.get('usd_krw', 0):,.0f}
-{stable_sig} 스테이블: ${stable.get('total_billions', 0):.0f}B
+{stable_sig} Stablecoin: ${stable.get('total_billions', 0):.0f}B
 
 ━━━━━━━━━━━━━━━━━━━
 🔗 [ETF](https://sosovalue.com/assets/etf/us-btc-spot) • [SOPR](https://charts.bgeometrics.com/lth_sopr.html) • [MVRV](https://charts.bgeometrics.com/mvrv.html) • [M2](https://charts.bgeometrics.com/m2_global.html)
 
 ━━━━━━━━━━━━━━━━━━━
-📋 *신호등 기준*
+📋 *Signal Criteria*
 
-*가격*
+*Price*
 • 120D MA: 🟢+5%↑ 🟡±5% 🔴-5%↓
-• 52주高: 🟢-15%내 🟡-40%내 🔴-40%↓
-• 52주低: 🟢+100%↑ 🟡+30%↑ 🔴+30%↓
+• 52w High: 🟢-15% 🟡-40% 🔴-40%↓
+• 52w Low: 🟢+100%↑ 🟡+30%↑ 🔴+30%↓
 
-*시장*
+*Market*
 • F&G: 🟢≤25 🟡26-74 🔴≥75
-• 김프: 🟢-1~2% 🟡-3~5% 🔴>5/<-3
-• 펀딩: 🟢-0.01~0.03 🟡~0.08 🔴>0.08
-• 도미: 🟢50-60% 🟡45-65% 🔴<45/>65
+• Kimchi: 🟢-1~2% 🟡-3~5% 🔴>5/<-3
+• Funding: 🟢-0.01~0.03 🟡~0.08 🔴>0.08
+• Dom: 🟢50-60% 🟡45-65% 🔴<45/>65
 
-*매크로*
+*Macro*
 • M2: 🟢YoY+5%↑ 🟡0-5% 🔴<0%
-• 스테이블: 🟢>$200B 🟡$150-200B 🔴<$150B
+• Stable: 🟢>$200B 🟡$150-200B 🔴<$150B
 """
     return report.strip()
 
 
+def generate_email_report(data: Dict[str, Any]) -> str:
+    """Generate HTML email report"""
+    
+    now = datetime.utcnow() + timedelta(hours=1)
+    time_str = now.strftime("%Y-%m-%d %H:%M")
+    
+    btc = data.get("btc", {})
+    eth = data.get("eth", {})
+    fg = data.get("fear_greed", {})
+    m2 = data.get("m2_supply", {})
+    fr = data.get("funding_rate", {})
+    kp = data.get("kimchi_premium", {})
+    dom = data.get("dominance", {})
+    stable = data.get("stablecoin", {})
+    
+    # Signals
+    btc_ma_dist = btc.get('ma_120_distance')
+    btc_ma_sig = get_ma_signal(btc_ma_dist)
+    btc_52h_sig = get_52w_high_signal(btc.get('from_52w_high'))
+    btc_52l_sig = get_52w_low_signal(btc.get('from_52w_low'))
+    
+    eth_ma_dist = eth.get('ma_120_distance')
+    eth_ma_sig = get_ma_signal(eth_ma_dist)
+    eth_52h_sig = get_52w_high_signal(eth.get('from_52w_high'))
+    eth_52l_sig = get_52w_low_signal(eth.get('from_52w_low'))
+    
+    fg_sig = get_fear_greed_signal(fg.get('value'))
+    kp_sig = get_kimchi_signal(kp.get('premium_percent'))
+    fr_sig = get_funding_signal(fr.get('rate_percent'))
+    dom_sig = get_dominance_signal(dom.get('btc_dominance'))
+    m2_sig = get_m2_signal(m2.get('yoy_change'))
+    stable_sig = get_stablecoin_signal(stable.get('total_billions'))
+    
+    btc_ma_str = f"{btc_ma_dist:+.1f}%" if btc_ma_dist else "N/A"
+    btc_ma_price = f"${btc.get('ma_120', 0):,.0f}" if btc.get('ma_120') else "N/A"
+    eth_ma_str = f"{eth_ma_dist:+.1f}%" if eth_ma_dist else "N/A"
+    eth_ma_price = f"${eth.get('ma_120', 0):,.0f}" if eth.get('ma_120') else "N/A"
+    
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
+            h1 {{ color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+            h2 {{ color: #555; margin-top: 25px; }}
+            .section {{ background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+            .price {{ font-size: 24px; font-weight: bold; }}
+            .change-pos {{ color: green; }}
+            .change-neg {{ color: red; }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            td {{ padding: 8px 0; }}
+            .signal {{ font-size: 18px; }}
+            .links {{ margin-top: 20px; }}
+            .links a {{ margin-right: 15px; color: #0066cc; }}
+            .criteria {{ background: #e8f4f8; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 12px; }}
+            .criteria h3 {{ margin-top: 0; }}
+        </style>
+    </head>
+    <body>
+        <h1>📊 Crypto Dashboard</h1>
+        <p><em>{time_str} CET</em></p>
+        
+        <div class="section">
+            <h2>BTC <span class="price">${btc.get('price_usd', 0):,.0f}</span> 
+            <span class="{'change-pos' if btc.get('change_24h', 0) >= 0 else 'change-neg'}">({btc.get('change_24h', 0):+.1f}%)</span></h2>
+            <table>
+                <tr><td class="signal">{btc_ma_sig}</td><td>120D MA: {btc_ma_price} ({btc_ma_str})</td></tr>
+                <tr><td class="signal">{btc_52h_sig}</td><td>vs 52w High: {btc.get('from_52w_high', 0):.1f}%</td></tr>
+                <tr><td class="signal">{btc_52l_sig}</td><td>vs 52w Low: +{btc.get('from_52w_low', 0):.1f}%</td></tr>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>ETH <span class="price">${eth.get('price_usd', 0):,.0f}</span>
+            <span class="{'change-pos' if eth.get('change_24h', 0) >= 0 else 'change-neg'}">({eth.get('change_24h', 0):+.1f}%)</span></h2>
+            <table>
+                <tr><td class="signal">{eth_ma_sig}</td><td>120D MA: {eth_ma_price} ({eth_ma_str})</td></tr>
+                <tr><td class="signal">{eth_52h_sig}</td><td>vs 52w High: {eth.get('from_52w_high', 0):.1f}%</td></tr>
+                <tr><td class="signal">{eth_52l_sig}</td><td>vs 52w Low: +{eth.get('from_52w_low', 0):.1f}%</td></tr>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>Market Indicators</h2>
+            <table>
+                <tr><td class="signal">{fg_sig}</td><td>Fear & Greed: {fg.get('value', 'N/A')} ({fg.get('classification', '')})</td></tr>
+                <tr><td class="signal">{kp_sig}</td><td>Kimchi Premium: {kp.get('premium_percent', 'N/A')}%</td></tr>
+                <tr><td class="signal">{fr_sig}</td><td>Funding Rate: {fr.get('rate_percent', 0):.4f}%</td></tr>
+                <tr><td class="signal">{dom_sig}</td><td>BTC Dominance: {dom.get('btc_dominance', 'N/A')}%</td></tr>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>Macro</h2>
+            <table>
+                <tr><td class="signal">{m2_sig}</td><td>US M2: ${m2.get('value_trillions', 0):.2f}T (YoY {m2.get('yoy_change', 0):+.1f}%)</td></tr>
+                <tr><td class="signal">⚪</td><td>USD/KRW: {kp.get('usd_krw', 0):,.0f}</td></tr>
+                <tr><td class="signal">{stable_sig}</td><td>Stablecoin: ${stable.get('total_billions', 0):.0f}B</td></tr>
+            </table>
+        </div>
+        
+        <div class="links">
+            <strong>🔗 Manual Check:</strong><br><br>
+            <a href="https://sosovalue.com/assets/etf/us-btc-spot">ETF Flow</a>
+            <a href="https://charts.bgeometrics.com/lth_sopr.html">LTH-SOPR</a>
+            <a href="https://charts.bgeometrics.com/mvrv.html">MVRV</a>
+            <a href="https://charts.bgeometrics.com/m2_global.html">Global M2</a>
+        </div>
+        
+        <div class="criteria">
+            <h3>📋 Signal Criteria</h3>
+            <p><strong>Price:</strong> 120D MA: 🟢+5%↑ 🟡±5% 🔴-5%↓ | 52w High: 🟢-15% 🟡-40% 🔴-40%↓ | 52w Low: 🟢+100%↑ 🟡+30%↑ 🔴+30%↓</p>
+            <p><strong>Market:</strong> F&G: 🟢≤25 🟡26-74 🔴≥75 | Kimchi: 🟢-1~2% 🟡-3~5% 🔴>5/<-3 | Funding: 🟢-0.01~0.03 🟡~0.08 🔴>0.08 | Dom: 🟢50-60% 🟡45-65% 🔴<45/>65</p>
+            <p><strong>Macro:</strong> M2: 🟢YoY+5%↑ 🟡0-5% 🔴<0% | Stable: 🟢>$200B 🟡$150-200B 🔴<$150B</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+
 # ============================================
-# 텔레그램 발송
+# SEND FUNCTIONS
 # ============================================
 
 def send_telegram(message: str) -> bool:
+    """Send via Telegram"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram 미설정")
+        print("⚠️ Telegram not configured")
         return False
     
     try:
@@ -523,21 +651,49 @@ def send_telegram(message: str) -> bool:
         }
         response = requests.post(url, json=payload, timeout=15)
         if response.status_code == 200:
-            print("✅ 텔레그램 발송 성공")
+            print("✅ Telegram sent")
             return True
         else:
-            print(f"❌ 발송 실패: {response.text}")
+            print(f"❌ Telegram failed: {response.text}")
     except Exception as e:
-        print(f"❌ 발송 오류: {e}")
+        print(f"❌ Telegram error: {e}")
+    return False
+
+
+def send_email(html_content: str) -> bool:
+    """Send via Outlook email"""
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        print("⚠️ Email not configured")
+        return False
+    
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"📊 Crypto Dashboard - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        msg["From"] = EMAIL_ADDRESS
+        msg["To"] = EMAIL_ADDRESS
+        
+        html_part = MIMEText(html_content, "html")
+        msg.attach(html_part)
+        
+        # Outlook SMTP
+        with smtplib.SMTP("smtp-mail.outlook.com", 587) as server:
+            server.starttls()
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_ADDRESS, EMAIL_ADDRESS, msg.as_string())
+        
+        print("✅ Email sent")
+        return True
+    except Exception as e:
+        print(f"❌ Email error: {e}")
     return False
 
 
 # ============================================
-# 메인
+# MAIN
 # ============================================
 
 def main():
-    print("🚀 크립토 대시보드 v4 시작...")
+    print("🚀 Crypto Dashboard v5 starting...")
     print("=" * 40)
     
     data = {}
@@ -562,29 +718,35 @@ def main():
     data["funding_rate"] = get_funding_rate()
     time.sleep(1)
     
-    print("📊 김치 프리미엄...")
+    print("📊 Kimchi Premium...")
     data["kimchi_premium"] = get_kimchi_premium()
     time.sleep(1)
     
-    print("📊 도미넌스...")
+    print("📊 Dominance...")
     data["dominance"] = get_btc_dominance()
     time.sleep(1)
     
-    print("📊 스테이블코인...")
+    print("📊 Stablecoin...")
     data["stablecoin"] = get_stablecoin_supply()
     
     print("=" * 40)
     
-    report = generate_report(data)
-    print("\n" + report)
-    send_telegram(report)
+    # Generate reports
+    telegram_report = generate_report(data)
+    email_report = generate_email_report(data)
     
-    # 저장
+    print("\n" + telegram_report)
+    
+    # Send
+    send_telegram(telegram_report)
+    send_email(email_report)
+    
+    # Save
     os.makedirs("data", exist_ok=True)
     with open("data/latest.json", "w", encoding="utf-8") as f:
         json.dump({"timestamp": datetime.now().isoformat(), "data": data}, f, ensure_ascii=False, indent=2)
     
-    print("\n✅ 완료!")
+    print("\n✅ Done!")
 
 
 if __name__ == "__main__":
