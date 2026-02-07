@@ -2,7 +2,11 @@ name: Daily Crypto Dashboard
 
 on:
   schedule:
-    - cron: '0 23 * * *'
+    # 독일 06:50 = UTC 05:50
+    - cron: '50 5 * * *'
+    # 독일 21:20 = UTC 20:20
+    - cron: '20 20 * * *'
+  
   workflow_dispatch:
 
 jobs:
